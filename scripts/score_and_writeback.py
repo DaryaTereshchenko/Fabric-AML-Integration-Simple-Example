@@ -13,6 +13,7 @@ import json
 import os
 import tempfile
 
+import mlflow
 import numpy as np
 import pandas as pd
 from azure.ai.ml import MLClient
@@ -46,6 +47,11 @@ def main():
         workspace_name=args.ml_workspace,
     )
 
+    # Set up MLflow tracking against the Azure ML workspace
+    tracking_uri = ml_client.workspaces.get(args.ml_workspace).mlflow_tracking_uri
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.set_experiment("superstore-forecast-scoring")
+
     # Invoke the endpoint
     print(f"Invoking endpoint '{args.endpoint_name}'...")
     request_payload = json.dumps({"forecast_months": args.forecast_months})
@@ -73,6 +79,42 @@ def main():
     predictions_df["Actual_Sales"] = np.nan
     predictions_df["MAPE"] = np.nan
     predictions_df["Category"] = "Furniture"
+
+    # Log everything to Azure ML via MLflow
+    with mlflow.start_run(run_name="cicd-score") as run:
+        # Log parameters
+        mlflow.log_params({
+            "endpoint_name": args.endpoint_name,
+            "forecast_months": args.forecast_months,
+        })
+
+        # Log scoring metrics
+        forecasted_values = predictions_df["Forecasted_Sales"]
+        mlflow.log_metric("num_predictions", len(predictions_df))
+        mlflow.log_metric("mean_forecasted_sales", float(forecasted_values.mean()))
+        mlflow.log_metric("min_forecasted_sales", float(forecasted_values.min()))
+        mlflow.log_metric("max_forecasted_sales", float(forecasted_values.max()))
+        mlflow.log_metric("std_forecasted_sales", float(forecasted_values.std()))
+
+        # Log the predictions table as a CSV artifact
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, prefix="predictions_"
+        ) as csv_file:
+            predictions_df.to_csv(csv_file, index=False)
+            csv_path = csv_file.name
+        mlflow.log_artifact(csv_path, artifact_path="predictions")
+        os.unlink(csv_path)
+
+        # Log raw endpoint response as JSON artifact
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, prefix="endpoint_response_"
+        ) as json_file:
+            json.dump(result, json_file, indent=2, default=str)
+            json_path = json_file.name
+        mlflow.log_artifact(json_path, artifact_path="responses")
+        os.unlink(json_path)
+
+        print(f"  MLflow run logged: {run.info.run_id}")
 
     # Write back to Fabric Lakehouse via DataLakeServiceClient
     workspace_id = os.environ["WORKSPACE_ID"]
