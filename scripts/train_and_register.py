@@ -11,15 +11,12 @@ Usage:
 import argparse
 import io
 import os
-import tempfile
 
 import mlflow
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from azure.ai.ml import MLClient
-from azure.ai.ml.entities import Model
-from azure.ai.ml.constants import AssetTypes
 from azure.identity import ClientSecretCredential
 from azure.storage.filedatalake import DataLakeServiceClient
 from sklearn.metrics import mean_absolute_percentage_error
@@ -134,20 +131,16 @@ def main():
             "seasonal_order": "(0,1,1,12)",
         })
 
-    # Save model locally and register via Azure ML SDK (bypasses blob upload)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        local_model_dir = os.path.join(tmpdir, args.model_name)
-        mlflow.statsmodels.save_model(results, local_model_dir)
-        print(f"  Model saved locally to {local_model_dir}")
-
-        model = ml_client.models.create_or_update(
-            Model(
-                path=local_model_dir,
-                name=args.model_name,
-                type=AssetTypes.MLFLOW_MODEL,
-            )
+        # Log and register model via MLflow (avoids direct blob upload)
+        mlflow.statsmodels.log_model(
+            results,
+            artifact_path="model",
+            registered_model_name=args.model_name,
         )
-        print(f"  Model registered in AML: {model.name}, version: {model.version}")
+        model_version = mlflow.register_model(
+            f"runs:/{run.info.run_id}/model", args.model_name
+        ).version
+        print(f"  Model registered in AML: {args.model_name}, version: {model_version}")
         print(f"  MAPE: {mape:.4f}")
 
         # Also register the model in Fabric's MLflow registry (best-effort)
