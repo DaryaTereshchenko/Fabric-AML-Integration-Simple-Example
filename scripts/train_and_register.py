@@ -132,15 +132,12 @@ def main():
         })
 
         # Log and register model via MLflow (avoids direct blob upload)
-        mlflow.statsmodels.log_model(
+        model_info = mlflow.statsmodels.log_model(
             results,
             artifact_path="model",
             registered_model_name=args.model_name,
         )
-        model_version = mlflow.register_model(
-            f"runs:/{run.info.run_id}/model", args.model_name
-        ).version
-        print(f"  Model registered in AML: {args.model_name}, version: {model_version}")
+        print(f"  Model registered in AML: {args.model_name}")
         print(f"  MAPE: {mape:.4f}")
 
         # Also register the model in Fabric's MLflow registry (best-effort)

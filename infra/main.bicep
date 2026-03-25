@@ -16,6 +16,12 @@ param location string = resourceGroup().location
 @description('Name of the managed online endpoint to create')
 param endpointName string = 'superstore-forecast-endpoint'
 
+@description('Object ID of the service principal that runs training (needs blob access)')
+param servicePrincipalObjectId string
+
+@description('Name of the existing storage account backing the Azure ML workspace')
+param mlStorageAccountName string
+
 @description('Tags applied to the endpoint')
 param tags object = {
   project: 'superstore-forecast'
@@ -25,6 +31,22 @@ param tags object = {
 // Reference the EXISTING Azure ML Workspace (no new resources created)
 resource mlWorkspace 'Microsoft.MachineLearningServices/workspaces@2024-04-01' existing = {
   name: mlWorkspaceName
+}
+
+// Reference the workspace's existing storage account
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: mlStorageAccountName
+}
+
+// Storage Blob Data Contributor — required for model artifact upload
+resource storageBlobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(storageAccount.id, servicePrincipalObjectId, 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+    principalId: servicePrincipalObjectId
+    principalType: 'ServicePrincipal'
+  }
 }
 
 // Managed Online Endpoint for real-time inference (the only new resource)
